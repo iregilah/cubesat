@@ -1,0 +1,4 @@
+## Managed component dependencies for the BSP.
+## Pulled automatically by the IDF Component Manager on first build.
+dependencies:
+  espressif/led_strip: "^2.5.3"

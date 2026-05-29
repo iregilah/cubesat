@@ -1,0 +1,42 @@
+# Default sdkconfig for C3SAT-OBC (ESP32-C6).
+# These values are applied on first configure; edit via `idf.py menuconfig`
+# or the CLion menuconfig action afterwards.
+
+# --- Target ---
+CONFIG_IDF_TARGET="esp32c6"
+
+# --- FreeRTOS kernel tuning (the heart of this reference project) ---
+# 1 kHz tick gives 1 ms scheduling granularity for our periodic subsystems.
+CONFIG_FREERTOS_HZ=1000
+# Enable runtime stats + trace facility so we can print per-task CPU usage
+# and stack high-water marks from the FDIR / housekeeping tasks.
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y
+# Check for stack overflow (method 2 = pattern check) and use a malloc-fail hook.
+CONFIG_FREERTOS_CHECK_STACKOVERFLOW_PTRVAL=n
+CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y
+CONFIG_FREERTOS_USE_IDLE_HOOK=y
+CONFIG_FREERTOS_USE_TICK_HOOK=n
+
+# --- Hardware watchdogs ---
+# Interrupt + task watchdog protect against a hung subsystem task; FDIR feeds them.
+CONFIG_ESP_INT_WDT=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
+
+# --- Console / logging ---
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
+
+# --- Flash: 8 MB part (N8) ---
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# --- Compiler ---
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+CONFIG_COMPILER_WARN_WRITE_STRINGS=y

@@ -1,0 +1,22 @@
+idf_component_register(
+    SRCS
+        "obc_state.c"
+        "clock_svc.c"
+        "telemetry.c"
+        "telecommand.c"
+        "storage.c"
+        "fdir.c"
+        "mode_manager.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        obc_common
+        bsp
+        drivers
+        freertos
+        esp_timer
+        esp_driver_uart
+        driver
+        spiffs
+        esp_task_wdt
+)

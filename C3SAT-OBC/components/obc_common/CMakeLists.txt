@@ -1,0 +1,9 @@
+idf_component_register(
+    SRCS
+        "obc_errors.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        freertos
+        esp_timer
+)

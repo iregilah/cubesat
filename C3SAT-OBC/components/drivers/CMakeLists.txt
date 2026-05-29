@@ -1,0 +1,18 @@
+idf_component_register(
+    SRCS
+        "ili9341.c"
+        "ina219.c"
+        "mpu6050.c"
+        "bme280.c"
+        "ds3231.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        obc_common
+        bsp
+        hal
+        driver
+        esp_driver_spi
+        esp_driver_gpio
+        esp_timer
+)

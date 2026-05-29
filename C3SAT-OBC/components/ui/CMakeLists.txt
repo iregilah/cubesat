@@ -1,0 +1,14 @@
+idf_component_register(
+    SRCS
+        "gfx.c"
+        "gui.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        obc_common
+        bsp
+        hal
+        drivers
+        services
+        freertos
+)

@@ -1,0 +1,16 @@
+idf_component_register(
+    SRCS
+        "eps.c"
+        "adcs.c"
+        "thermal.c"
+        "cdh.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        obc_common
+        bsp
+        drivers
+        services
+        freertos
+        esp_timer
+)

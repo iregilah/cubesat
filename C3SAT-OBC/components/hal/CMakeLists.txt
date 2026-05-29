@@ -1,0 +1,14 @@
+idf_component_register(
+    SRCS
+        "hal_i2c.c"
+        "hal_spi.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        obc_common
+        bsp
+        driver
+        esp_driver_i2c
+        esp_driver_spi
+        freertos
+)

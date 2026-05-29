@@ -1,0 +1,9 @@
+# Partition table for C3SAT-OBC on an 8 MB flash (ESP32-C6-N8).
+# Name,       Type, SubType,  Offset,   Size,   Flags
+nvs,          data, nvs,      0x9000,   0x6000,
+phy_init,     data, phy,      0xf000,   0x1000,
+factory,      app,  factory,  0x10000,  2M,
+# "Mass memory" – onboard telemetry storage, modelled as a SPIFFS partition.
+# A real CubeSat would use an eMMC/NAND mass-memory module; here we emulate it
+# on the spare internal flash so the storage service has a real filesystem.
+massmem,      data, spiffs,   ,         4M,
