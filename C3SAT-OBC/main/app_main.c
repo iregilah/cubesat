@@ -89,3 +89,22 @@ void app_main(void)
     ESP_LOGI(TAG, "init done, free heap = %u B",
              (unsigned) esp_get_free_heap_size());
 }
+
+/**
+ * @brief FreeRTOS idle hook (enabled by CONFIG_FREERTOS_USE_IDLE_HOOK=y).
+ *
+ * Called repeatedly from the idle task whenever no other task is ready to run.
+ * The kernel requires this symbol to exist once the idle hook is enabled in
+ * sdkconfig. It runs in the idle task's context, so it MUST NOT block or call
+ * any FreeRTOS API that could yield (no vTaskDelay, no queue waits): doing so
+ * would starve the idle task and break clean-up of deleted tasks.
+ *
+ * We keep it deliberately empty: on the ESP32-C6 the IDF idle task already
+ * parks the core (WFI / tickless idle when power management is on) and FDIR
+ * owns watchdog feeding from its own task. This hook stays as a documented
+ * extension point for lightweight idle-time bookkeeping (e.g. a crude CPU-idle
+ * counter) without disturbing the scheduler.
+ */
+void vApplicationIdleHook(void)
+{
+}

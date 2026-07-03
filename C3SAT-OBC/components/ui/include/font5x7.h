@@ -6,8 +6,8 @@
  * Within a byte bit0 is the top row, bit6 the seventh row. The gfx layer folds
  * lowercase to uppercase, so only 0x20..0x5F need to be defined here.
  */
-#ifndef FONT5X7_H
-#define FONT5X7_H
+#ifndef UI_FONT5X7_H
+#define UI_FONT5X7_H
 
 #include <stdint.h>
 
@@ -83,4 +83,4 @@ static const uint8_t font5x7[(FONT5X7_LAST - FONT5X7_FIRST + 1)][FONT5X7_W] = {
     {0x40,0x40,0x40,0x40,0x40}, /* _ */
 };
 
-#endif /* FONT5X7_H */
+#endif /* UI_FONT5X7_H */

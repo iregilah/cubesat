@@ -10,6 +10,7 @@
 #define STORAGE_H
 
 #include <stdint.h>
+#include <stddef.h>
 #include "obc_errors.h"
 
 #ifdef __cplusplus

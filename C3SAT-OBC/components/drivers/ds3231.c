@@ -18,7 +18,7 @@ static uint8_t dec2bcd(uint8_t v) { return ((v / 10) << 4) | (v % 10); }
 obc_err_t ds3231_init(void)
 {
     s_present = (hal_i2c_probe(BSP_I2C_ADDR_DS3231) == OBC_OK);
-    ESP_LOGI(TAG, s_present ? "DS3231 online" : "no RTC -> esp_timer clock");
+    ESP_LOGI(TAG, "%s", s_present ? "DS3231 online" : "no RTC -> esp_timer clock");
     return OBC_OK;
 }
 
