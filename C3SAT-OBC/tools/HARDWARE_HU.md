@@ -94,27 +94,32 @@ kötöd, ott írd át.
 | GND | föld | **`GND`** |
 
 > **Miért nincs MISO?** Ez a firmware sosem olvas vissza a panelről, a `SDO`
-> csak regiszter-visszaolvasáshoz kellene. Az ESP32-C6-WROOM-1-en viszont
-> kevés a szabad, nem-strapping, nem-USB láb, és 6 kell (4 touch + 2 IM). Ezért
-> a **`SDO`-t szándékosan bekötetlenül hagyjuk**, és a felszabaduló **GPIO2-t**
-> (ami ADC-képes, ideális a touch-hoz) használjuk. A kép ettől bitre ugyanúgy
-> rajzolódik.
+> csak regiszter-visszaolvasáshoz kellene. Az ESP32-C6-DevKitC-1-en viszont
+> kevés a szabad, nem-strapping, nem-USB láb (pl. a **GPIO14 nincs is kivezetve**
+> a headerére — a belső flash-buszé). Ezért **két** lépéssel spórolunk lábat:
+> (1) a **`SDO`-t bekötetlenül hagyjuk**, így felszabadul a **GPIO2** (ADC-képes,
+> ideális a touch-hoz); (2) az **`IM1` és `IM2` közös GPIO-ra** megy (mindkettő
+> ugyanaz a logikai 1), így egy láb elég kettő helyett — ez adja a touch `Y-`-nak
+> a GPIO21-et. A kép ettől bitre ugyanúgy rajzolódik.
 
 #### Interfész-mód strappelés — KÖTELEZŐ a SPI-hoz ⚠️ (most GPIO hajtja)
 
 A panel alapból a párhuzamos buszra van állítva. SPI-hoz az **`IM0..IM3`** lábakat
 kell „4-vezetékes 8-bites soros I" módra állítani (ILI9341 = `IM[3:0] = 0b0110`).
 Mivel a DevKiten **csak egy 3V3 láb van** (kell a panel/szenzor VCC-hez), az
-`IM1`/`IM2`-t **nem** kötjük 3V3 sínre, hanem **két GPIO tartja folyamatosan
+`IM1`/`IM2`-t **nem** kötjük 3V3 sínre, hanem **egy GPIO tartja folyamatosan
 magasban** az egész futás alatt (a firmware `bsp_display_straps_high()`-ban
 állítja be, még a panel reset előtt, így a strap érvényes, amikor az ILI9341
-belövi az interfész-módot). `IM0`/`IM3` marad GND-n (GND láb van bőven).
+belövi az interfész-módot). Mivel `IM1` és `IM2` **ugyanaz a logikai 1**, a panel
+mindkét lábát **ugyanarra a GPIO20-ra** kötöd (egy kimenet két nagyimpedanciás
+strap-bemenetet elbír) — így egy láb megmarad a touch `Y-`-nak. `IM0`/`IM3`
+GND-n marad (GND láb van bőven).
 
 | TFT Proto láb | Hova kösd | Bit |
 |---|---|---|
 | **`IM0`** | **GND** | 0 |
 | **`IM1`** | **GPIO20** (firmware tartja HIGH) | 1 |
-| **`IM2`** | **GPIO21** (firmware tartja HIGH) | 1 |
+| **`IM2`** | **GPIO20** (ugyanaz a láb, mint IM1) | 1 |
 | **`IM3`** | **GND** | 0 |
 
 Strappelés nélkül a kijelző a párhuzamos buszon marad, és a SPI vonalak **nem
@@ -134,7 +139,7 @@ szemközti réteget ADC-vel mintavételezi. Ezért 3 vonal ADC-képes lábon ül
 | 1  | **`X+`** | ADC1_CH1 | analóg mintavétel |
 | 2  | **`Y+`** | ADC1_CH2 | analóg mintavétel (ez a volt-MISO láb) |
 | 3  | **`X-`** | ADC1_CH3 | analóg mintavétel + meghajtás |
-| 14 | **`Y-`** | —        | csak digitális meghajtás |
+| 21 | **`Y-`** | —        | csak digitális meghajtás (az IM-megosztás szabadította fel) |
 
 > A leképezés (nyers ADC → képpont) a `components/drivers/touch.h`
 > `TOUCH_CAL_*` konstansaiban van; panel-/bekötésfüggő, **kalibráld a saját
@@ -170,8 +175,9 @@ szemközti réteget ADC-vel mintavételezi. Ezért 3 vonal ADC-képes lábon ül
 > (csak reseten mintavételezett, kimenetként utána ártalmatlan) — ezt
 > mód-jelzésre használjuk. A **GPIO4/5** teljesen üresen marad.
 >
-> **Foglalt lábak összegzése:** kijelző 6,7,10,11,18,19 + IM 20,21; touch
-> 1,2,3,14; I2C 22,23; UART 16,17; RGB LED 8; napelem-ADC 0.
+> **Foglalt lábak összegzése:** kijelző 6,7,10,11,18,19 + IM 20 (IM1+IM2 közös);
+> touch 1,2,3,21; I2C 22,23; UART 16,17; RGB LED 8; napelem-ADC 0.
+> (A **GPIO14 nincs kivezetve** a DevKitC-1-en, ezért nem használjuk.)
 
 ---
 
@@ -192,10 +198,10 @@ nyers ILI9341 lábnevek** (ezért nem találtál „SCLK"-t!).
 **Két lépés kell:**
 
 **1) Kösd az `IM0..IM3` strap-lábakat soros módra:**
-`IM0→GND, IM3→GND`, majd **`IM1→GPIO20` és `IM2→GPIO21`** (ezeket a firmware
-tartja folyamatosan HIGH-on — így nem kell a második 3V3, amiből nincs is). Ez
-kapcsolja a vezérlőt 4-vezetékes soros (SPI) módba. Enélkül a SPI vonalak
-hatástalanok.
+`IM0→GND, IM3→GND`, majd **`IM1` és `IM2` EGYÜTT a `GPIO20`-ra** (a firmware
+tartja folyamatosan HIGH-on — így nem kell a második 3V3, amiből nincs is, és
+egy láb megmarad a touch `Y-`-nak). Ez kapcsolja a vezérlőt 4-vezetékes soros
+(SPI) módba. Enélkül a SPI vonalak hatástalanok.
 
 **2) Köss a soros jeleket** a tábla feliratai szerint a fenti GPIO-kra:
 
@@ -216,12 +222,12 @@ hatástalanok.
 | **`X+`** | 1 |
 | **`Y+`** | 2 |
 | **`X-`** | 3 |
-| **`Y-`** | 14 |
+| **`Y-`** | 21 |
 
 > A leggyakoribb hiba itt: az órajelet az `SDI`/`SDO` közelében keresni. A táblán
 > **a `WR` láb a soros órajel** — kösd azt a GPIO6-ra. A `SDO`-t most **nem**
-> kötjük be (a GPIO2 a touch `Y+`-a lett). Az `IM1`/`IM2` immár GPIO20/21-re megy,
-> nem 3V3-ra.
+> kötjük be (a GPIO2 a touch `Y+`-a lett). Az `IM1`/`IM2` immár **közösen a
+> GPIO20-ra** megy (nem 3V3-ra), a felszabaduló GPIO21 pedig a touch `Y-`-a.
 
 **Háttérvilágítás (`LED-A` / `LED-K`):** a panelnek külön anód (`LED-A`) és katód
 (`LED-K`) háttérvilágítás-lába van. Köss **`LED-K`→GND**, és **`LED-A`→3V3 egy kis
@@ -492,14 +498,14 @@ működik.
 | Semmi a konzolon | rossz port / rossz USB csatlakozó | az **USB** (nem UART) portot használd, `idf.py -p ... monitor` |
 | `i2c ... timeout`, szenzor „not found" | rossz SDA/SCL, hiányzó felhúzó, rossz cím | ellenőrizd 22/23-at, tegyél 4,7 kΩ felhúzót, nézd a címet |
 | MPU6050 és DS3231 közül egyik se látszik | `0x68` címütközés | MPU6050 **AD0 → 3V3** (0x69) |
-| Kijelző fehér/üres | nincs IM strap (panel párhuzamos módban), nincs háttérvilágítás, rossz CS/RS/RST | strappeld `IM0→GND, IM1/IM2→3V3, IM3→GND`; `LED-A`→3V3 soros R-en; ellenőrizd `CS`=10, `RS`=11, `RST`=18 |
-| Kijelző fehér, pedig IM1/IM2 GPIO-ra van kötve | a `bsp_display_straps_high()` nem futott le a panel reset ELŐTT | ellenőrizd, hogy a `bsp_init()` legelső hívása; GPIO20/21 tényleg a fizikai IM1/IM2 lábra megy; mérd meg multiméterrel, hogy 3V3-at ad |
+| Kijelző fehér/üres | nincs IM strap (panel párhuzamos módban), nincs háttérvilágítás, rossz CS/RS/RST | `IM1+IM2→GPIO20` (firmware tartja HIGH), `IM0/IM3→GND`; `LED-A`→3V3 soros R-en; ellenőrizd `CS`=10, `RS`=11, `RST`=18 |
+| Kijelző fehér, pedig IM GPIO-ra van kötve | a `bsp_display_straps_high()` nem futott le a panel reset ELŐTT | ellenőrizd, hogy a `bsp_init()` legelső hívása; a **GPIO20** tényleg a fizikai `IM1` **és** `IM2` lábra megy (mindkettő ugyanoda); mérd meg multiméterrel, hogy 3V3-at ad |
 | Kijelző szemetes/torz | SPI láb felcserélve, vagy az órajelet rossz lábra kötötted | a **soros órajel a `WR` láb → GPIO6** (NEM „SCLK"!); `SDI`→7; nézd át az IM strapeket (4.2) |
 | Kijelző tükrözött/elforgatott | rotáció | `gfx_init()`-ben az `ILI9341_ROT_*` érték állítható |
 | Folyton FAULT (piros) | valós alacsony tápfesz, vagy potméter alul | tekerd a potmétert fel, vagy nézd a VBUS-t |
 | `groundstation` nem lát semmit | rossz soros port / nem a „UART" portra kötve | a 2. USB-C-t a **UART** portba; helyes `--port` |
 | Boot-loop / brownout | háttérvilágítás/kijelző túl sok áram | külön 3V3 táp a kijelzőnek, vagy erősebb USB-port |
-| Érintés nem reagál | rossz 4-vezetékes bekötés, vagy túl magas `TOUCH_Z_THRESHOLD` | ellenőrizd `X+`=1, `Y+`=2, `X-`=3, `Y-`=14; csökkentsd a `TOUCH_Z_THRESHOLD`-ot a `touch.h`-ban |
+| Érintés nem reagál | rossz 4-vezetékes bekötés, vagy túl magas `TOUCH_Z_THRESHOLD` | ellenőrizd `X+`=1, `Y+`=2, `X-`=3, `Y-`=21; csökkentsd a `TOUCH_Z_THRESHOLD`-ot a `touch.h`-ban |
 | Érintés van, de rossz helyre üt | kalibráció / orientáció | állítsd a `TOUCH_CAL_*_MIN/MAX` és `TOUCH_INVERT_X/Y`, `TOUCH_SWAP_XY` értékeket a `touch.h`-ban (nézd a soros logban a nyers rx/ry-t) |
 | „Fantom" érintések panel nélkül | nyitott ADC-lábak lebegnek | a `read_z_raw` belső pulldownnal védve; ha mégis van, tesztelj `TOUCH_SIMULATE 1`-gyel (nincs ADC-olvasás) |
 | Menü nem nyílik, csak a dashboard | touch task nem indult, vagy üres a tap-queue | nézd a logban a `touch ADC ready` sort; ellenőrizd hogy `touch_start()` lefutott az `app_main`-ben |

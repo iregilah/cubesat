@@ -151,16 +151,17 @@ particular there is **no "SCLK" pin: the serial clock is the `WR` pin**.
 | 11            | LCD DC         | `RS`                 |
 | 18            | LCD RESET      | `RST`                |
 | 19            | Backlight (+)  | `LED-A` (via R/NPN); `LED-K`→GND |
-| 20            | IM1 strap HIGH | `IM1` (firmware-driven 3V3) |
-| 21            | IM2 strap HIGH | `IM2` (firmware-driven 3V3) |
+| 20            | IM1 + IM2 strap HIGH | `IM1` **and** `IM2` tied together (firmware-driven HIGH) |
 
 > ⚠️ **Display SPI strapping (required).** The MikroE TFT Proto defaults to the
 > parallel bus. The interface-mode pins select **4-wire 8-bit serial I**
 > (`IM = 0b0110`): `IM0→GND, IM3→GND`, and **`IM1`, `IM2` are held HIGH by the
-> firmware** on GPIO20/21. The DevKit exposes only one `3V3` pad, so rather than
-> daisy-chaining, `bsp_display_straps_high()` drives both IM pins high as the very
-> first step of `bsp_init()` — before the panel leaves reset — so the straps are
-> valid in time. Then wire the serial signals per the table; the clock is `WR`.
+> firmware**. Since both are the same logic level, the panel's `IM1` and `IM2`
+> pins are **tied together to a single GPIO20** — the DevKit exposes only one
+> `3V3` pad, and sharing one GPIO also frees a pin for the touch `Y-` line.
+> `bsp_display_straps_high()` drives it high as the very first step of
+> `bsp_init()` — before the panel leaves reset — so the strap is valid in time.
+> Then wire the serial signals per the table; the clock is `WR`.
 >
 > **Touch (implemented):** the panel's bare 4-wire resistive touch (`X+ X- Y+ Y-`)
 > has **no on-board controller IC**, so the firmware reads it directly via the
@@ -175,7 +176,10 @@ particular there is **no "SCLK" pin: the serial clock is the `WR` pin**.
 | 1             | X+     | `X+`             | ADC1_CH1                |
 | 2             | Y+     | `Y+`             | ADC1_CH2 (was MISO)     |
 | 3             | X-     | `X-`             | ADC1_CH3                |
-| 14            | Y-     | `Y-`             | digital drive only      |
+| 21            | Y-     | `Y-`             | digital drive only (freed by IM sharing) |
+
+> Note: GPIO14 is **not** broken out on the ESP32-C6-DevKitC-1 (reserved for the
+> internal flash SPI bus), so `Y-` uses GPIO21, freed by tying IM1+IM2 to one pin.
 
 **Sensors — shared I2C bus:**
 
