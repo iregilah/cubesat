@@ -33,12 +33,14 @@
  *
  * The ESP32-C6 DevKit has only ONE 3V3 pin, which is already needed for the
  * panel/sensor VCC rails. So instead of soldering IM1 and IM2 to a 3V3 rail,
- * this firmware drives them from a GPIO held permanently HIGH for the whole
+ * this firmware drives them from GPIOs held permanently HIGH for the whole
  * runtime (bsp_display_straps_high(), called first thing in bsp_init(), i.e.
  * BEFORE the panel is released from reset so the strap is valid when the ILI9341
- * latches its interface mode). Because IM1 and IM2 are the SAME logic level (1),
- * both panel pins are tied together to a SINGLE GPIO (BSP_PIN_LCD_IM), which
- * also frees a GPIO for the touch Y- line. IM0/IM3 stay hard-wired to GND.
+ * latches its interface mode). IM1 and IM2 are the SAME logic level (1) but each
+ * gets its OWN GPIO — you cannot bond two panel pins onto one wire on a
+ * breadboard. IM1 uses the last free non-strapping pin (GPIO20); IM2 uses a
+ * spare strapping pin (GPIO4 / MTMS) that does NOT select the chip boot mode.
+ * IM0/IM3 stay hard-wired to GND.
  *
  * --- Touch panel (NOW DRIVEN) ----------------------------------------------
  * The panel carries a 4-wire RESISTIVE touch (header pins X+, X-, Y+, Y-) with
@@ -49,28 +51,36 @@
  * the four touch lines therefore sit on ADC1-capable pins (GPIO1/2/3); the 4th
  * is a plain digital drive line. See components/drivers/touch.c.
  *
- * --- Pin budget note: MISO/SDO dropped + IM straps share one GPIO ------------
+ * --- Pin budget note: MISO/SDO dropped, IM2 on a spare strapping pin ---------
  * The ESP32-C6-DevKitC-1 breaks out very few free, non-strapping, non-USB GPIOs.
  * NOTE: GPIO14 is NOT on the DevKitC-1 headers (reserved for the internal flash
  * SPI bus), and GPIO24-30 are the module's SPI flash — none are usable. After
  * display control + I2C + UART + status LED + solar ADC, only GPIO1, 2, 3, 20,
- * 21 remain safely free — five pins for what naively looks like six (4 touch +
- * 2 IM). Two independent measures close the gap:
+ * 21 remain as free NON-strapping pins — five pins for the six this design needs
+ * (4 touch + 2 IM straps). Two independent measures close the gap:
  *   1) MISO/SDO is dropped. This firmware NEVER reads back from the panel, so
  *      the optional SDO line is unnecessary: we free GPIO2 (an ADC1 pin, ideal
- *      for touch) by leaving MISO unconnected (BSP_PIN_SPI_MISO = -1).
- *   2) IM1 and IM2 are both a constant logic HIGH (IM=0b0110), so ONE GPIO
- *      output drives BOTH strap inputs (wire the panel's IM1 and IM2 together to
- *      BSP_PIN_LCD_IM). That frees GPIO21 for the touch Y- drive line, and still
- *      needs no second 3V3 pad.
- * Net: touch X+=1, Y+=2, X-=3, Y-=21; IM1+IM2=20 (shared); SDO unwired.
+ *      for touch) by leaving MISO unconnected (BSP_PIN_SPI_MISO = -1). That
+ *      covers touch X+=1, Y+=2, X-=3, Y-=21 and IM1=20 on clean GPIOs.
+ *   2) The 6th signal, IM2, is a STATIC logic-1 strap, so it is placed on a
+ *      spare strapping pin (BSP_PIN_LCD_IM2 = GPIO4 / MTMS). This is safe: GPIO4
+ *      is a JTAG/SDIO strap that does NOT select the chip boot mode (only GPIO8
+ *      and GPIO9 do that); the panel's IM2 input is high-impedance so it cannot
+ *      disturb the strap at power-on reset; and the firmware drives GPIO4 HIGH in
+ *      bsp_display_straps_high() long before the panel is released from RST — so
+ *      the ESP32 always boots normally and the panel still latches IM=0b0110.
+ *      (We debug over the built-in USB-Serial-JTAG on GPIO12/13, so the external
+ *      MTMS/MTDI JTAG pins are otherwise unused.)
+ * Net: touch X+=1, Y+=2, X-=3, Y-=21; IM1=20, IM2=4 (spare strap); SDO unwired.
  * =========================================================================
  *
- * The ESP32-C6 strapping pins (GPIO4, GPIO5, GPIO8, GPIO9, GPIO15) and the
- * USB-Serial-JTAG pins (GPIO12 = D-, GPIO13 = D+) are deliberately kept free of
- * boot-critical wiring. GPIO8 carries the on-board RGB LED (only sampled at
- * reset, harmless as an output afterwards); GPIO4/5 are left entirely unused so
- * their reset-time level can never disturb the boot mode.
+ * The BOOT-MODE strapping pins (GPIO8, GPIO9) and the USB-Serial-JTAG pins
+ * (GPIO12 = D-, GPIO13 = D+) are deliberately kept free of boot-critical wiring.
+ * GPIO8 carries the on-board RGB LED (only sampled at reset, harmless as an
+ * output afterwards); GPIO9 is the BOOT button. The remaining strapping pins
+ * GPIO4 (MTMS), GPIO5 (MTDI), GPIO15 only steer JTAG/SDIO, NOT the boot mode, so
+ * GPIO4 safely hosts the static IM2 strap (see the pin-budget note above);
+ * GPIO5/GPIO15 stay unused.
  */
 #ifndef BSP_PINS_H
 #define BSP_PINS_H
@@ -87,10 +97,13 @@
 #define BSP_PIN_LCD_BL      19  /**< -> TFT Proto "LED-A" backlight (via series R/NPN);
                                  *      "LED-K" -> GND. Active high. */
 
-/* Interface-mode strap, driven HIGH by GPIO for the whole runtime (see the
- * header comment). IM1 and IM2 are both logic 1 for "4-wire serial I", so wire
- * BOTH panel pins (IM1 and IM2) to this single GPIO. IM0/IM3 -> GND. */
-#define BSP_PIN_LCD_IM      20  /**< -> TFT Proto "IM1" AND "IM2" (tied together), held HIGH by firmware. */
+/* Interface-mode straps, each driven HIGH by its own GPIO for the whole runtime
+ * (see the header comment). IM1 and IM2 are both logic 1 for "4-wire serial I",
+ * but they get SEPARATE GPIOs (you cannot bond two panel pins to one wire on a
+ * breadboard). IM2 sits on spare strapping pin GPIO4 (MTMS), which is safe
+ * because it is not a boot-mode strap. IM0/IM3 -> GND. */
+#define BSP_PIN_LCD_IM1     20  /**< -> TFT Proto "IM1", held HIGH by firmware. */
+#define BSP_PIN_LCD_IM2     4   /**< -> TFT Proto "IM2", held HIGH by firmware (spare strapping pin MTMS). */
 
 #define BSP_LCD_SPI_HZ      (40 * 1000 * 1000) /**< 40 MHz pixel clock. */
 #define BSP_LCD_WIDTH       320
@@ -104,7 +117,7 @@
 #define BSP_PIN_TOUCH_XP    1   /**< TFT Proto "X+"  (ADC1_CH1, analog read). */
 #define BSP_PIN_TOUCH_YP    2   /**< TFT Proto "Y+"  (ADC1_CH2, analog read; was MISO). */
 #define BSP_PIN_TOUCH_XM    3   /**< TFT Proto "X-"  (ADC1_CH3, analog read + drive). */
-#define BSP_PIN_TOUCH_YM    21  /**< TFT Proto "Y-"  (digital drive only; freed by IM sharing). */
+#define BSP_PIN_TOUCH_YM    21  /**< TFT Proto "Y-"  (digital drive only; GPIO14 is NOT broken out, so use GPIO21). */
 
 #define BSP_TOUCH_ADC_UNIT  ADC_UNIT_1
 #define BSP_TOUCH_CH_XP     ADC_CHANNEL_1  /**< must match BSP_PIN_TOUCH_XP. */

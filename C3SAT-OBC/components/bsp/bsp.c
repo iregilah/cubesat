@@ -60,18 +60,22 @@ static void init_led(void)
 
 void bsp_display_straps_high(void)
 {
-    /* Configure the strap GPIO as an output and latch it HIGH. A GPIO output
+    /* Configure both strap GPIOs as outputs and latch them HIGH. A GPIO output
      * holds its level with no further attention, so the IM straps stay high for
-     * the entire runtime. The panel's IM1 and IM2 pins are tied together to this
-     * one GPIO (both need logic 1). Must run before the panel's reset pulse
-     * (ili9341_init). */
+     * the entire runtime. IM1 and IM2 each need logic 1 but sit on separate
+     * GPIOs (you cannot bond two panel pins to one wire on a breadboard); IM2 is
+     * on spare strapping pin GPIO4, driven HIGH here — before the panel's reset
+     * pulse (ili9341_init) — so the ESP32 has already booted and the panel
+     * latches a valid IM. */
     gpio_config_t io = {
-        .pin_bit_mask = (1ULL << BSP_PIN_LCD_IM),
+        .pin_bit_mask = (1ULL << BSP_PIN_LCD_IM1) | (1ULL << BSP_PIN_LCD_IM2),
         .mode = GPIO_MODE_OUTPUT,
     };
     gpio_config(&io);
-    gpio_set_level(BSP_PIN_LCD_IM, 1);
-    ESP_LOGI(TAG, "ILI9341 IM straps high: IM1+IM2=GPIO%d", BSP_PIN_LCD_IM);
+    gpio_set_level(BSP_PIN_LCD_IM1, 1);
+    gpio_set_level(BSP_PIN_LCD_IM2, 1);
+    ESP_LOGI(TAG, "ILI9341 IM straps high: IM1=GPIO%d IM2=GPIO%d",
+             BSP_PIN_LCD_IM1, BSP_PIN_LCD_IM2);
 }
 
 obc_err_t bsp_init(void)

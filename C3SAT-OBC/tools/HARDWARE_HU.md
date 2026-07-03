@@ -96,30 +96,39 @@ kötöd, ott írd át.
 > **Miért nincs MISO?** Ez a firmware sosem olvas vissza a panelről, a `SDO`
 > csak regiszter-visszaolvasáshoz kellene. Az ESP32-C6-DevKitC-1-en viszont
 > kevés a szabad, nem-strapping, nem-USB láb (pl. a **GPIO14 nincs is kivezetve**
-> a headerére — a belső flash-buszé). Ezért **két** lépéssel spórolunk lábat:
-> (1) a **`SDO`-t bekötetlenül hagyjuk**, így felszabadul a **GPIO2** (ADC-képes,
-> ideális a touch-hoz); (2) az **`IM1` és `IM2` közös GPIO-ra** megy (mindkettő
-> ugyanaz a logikai 1), így egy láb elég kettő helyett — ez adja a touch `Y-`-nak
-> a GPIO21-et. A kép ettől bitre ugyanúgy rajzolódik.
+> a headerére — a belső flash-buszé). A napelem-ADC/UART/LED/I2C után csak
+> `GPIO1,2,3,20,21` marad szabad **nem-strapping** láb — öt láb a hat helyett,
+> amit ez a kialakítás igényel (4 touch + 2 IM). Ezért **két** lépéssel oldjuk
+> meg: (1) a **`SDO`-t bekötetlenül hagyjuk**, így felszabadul a **GPIO2**
+> (ADC-képes, ideális a touch-hoz) — ez elég a touch `X+`=1, `Y+`=2, `X-`=3,
+> `Y-`=21 és az `IM1`=20 tiszta lábakra; (2) a hatodik jel, az **`IM2`**, egy
+> **statikus logikai 1** strap, ezért egy **szabad strapping-lábra** kerül:
+> **`IM2` = GPIO4 (MTMS)**. Ez biztonságos, mert a GPIO4 JTAG/SDIO strap, ami
+> **NEM** választja ki a chip boot-módját (azt csak a GPIO8/GPIO9 teszi); a panel
+> `IM2` bemenete nagyimpedanciás, így reseten nem tudja elhúzni a strapet; a
+> firmware pedig már jóval a panel RST-je előtt HIGH-ra hajtja — így az ESP32
+> mindig normálisan bootol, a panel meg érvényes IM-et lát. A kép bitre ugyanúgy
+> rajzolódik.
 
 #### Interfész-mód strappelés — KÖTELEZŐ a SPI-hoz ⚠️ (most GPIO hajtja)
 
 A panel alapból a párhuzamos buszra van állítva. SPI-hoz az **`IM0..IM3`** lábakat
 kell „4-vezetékes 8-bites soros I" módra állítani (ILI9341 = `IM[3:0] = 0b0110`).
 Mivel a DevKiten **csak egy 3V3 láb van** (kell a panel/szenzor VCC-hez), az
-`IM1`/`IM2`-t **nem** kötjük 3V3 sínre, hanem **egy GPIO tartja folyamatosan
+`IM1`/`IM2`-t **nem** kötjük 3V3 sínre, hanem **GPIO-k tartják folyamatosan
 magasban** az egész futás alatt (a firmware `bsp_display_straps_high()`-ban
 állítja be, még a panel reset előtt, így a strap érvényes, amikor az ILI9341
-belövi az interfész-módot). Mivel `IM1` és `IM2` **ugyanaz a logikai 1**, a panel
-mindkét lábát **ugyanarra a GPIO20-ra** kötöd (egy kimenet két nagyimpedanciás
-strap-bemenetet elbír) — így egy láb megmarad a touch `Y-`-nak. `IM0`/`IM3`
+belövi az interfész-módot). `IM1` és `IM2` **ugyanaz a logikai 1**, de **külön-külön
+GPIO-ra** megy — breadboardon nem lehet két panellábat egy vezetékre kötni. Az
+`IM1` az utolsó szabad nem-strapping lábra (**GPIO20**) kerül, az `IM2` pedig egy
+szabad **strapping-lábra** (**GPIO4 / MTMS**), ami NEM boot-mód strap. `IM0`/`IM3`
 GND-n marad (GND láb van bőven).
 
 | TFT Proto láb | Hova kösd | Bit |
 |---|---|---|
 | **`IM0`** | **GND** | 0 |
 | **`IM1`** | **GPIO20** (firmware tartja HIGH) | 1 |
-| **`IM2`** | **GPIO20** (ugyanaz a láb, mint IM1) | 1 |
+| **`IM2`** | **GPIO4** (firmware tartja HIGH; szabad strapping-láb) | 1 |
 | **`IM3`** | **GND** | 0 |
 
 Strappelés nélkül a kijelző a párhuzamos buszon marad, és a SPI vonalak **nem
@@ -139,7 +148,7 @@ szemközti réteget ADC-vel mintavételezi. Ezért 3 vonal ADC-képes lábon ül
 | 1  | **`X+`** | ADC1_CH1 | analóg mintavétel |
 | 2  | **`Y+`** | ADC1_CH2 | analóg mintavétel (ez a volt-MISO láb) |
 | 3  | **`X-`** | ADC1_CH3 | analóg mintavétel + meghajtás |
-| 21 | **`Y-`** | —        | csak digitális meghajtás (az IM-megosztás szabadította fel) |
+| 21 | **`Y-`** | —        | csak digitális meghajtás (a **GPIO14 nincs kivezetve**, ezért GPIO21) |
 
 > A leképezés (nyers ADC → képpont) a `components/drivers/touch.h`
 > `TOUCH_CAL_*` konstansaiban van; panel-/bekötésfüggő, **kalibráld a saját
@@ -170,13 +179,15 @@ szemközti réteget ADC-vel mintavételezi. Ezért 3 vonal ADC-képes lábon ül
 | 16 | TX (a hídnak) |
 | 17 | RX (a hídtól) |
 
-> Az alábbi lábakat szándékosan **nem** használjuk boot-kritikus bekötéshez:
-> GPIO4/5/8/9/15 (strapping), GPIO12/13 (USB). A GPIO8 a beépített RGB LED
-> (csak reseten mintavételezett, kimenetként utána ártalmatlan) — ezt
-> mód-jelzésre használjuk. A **GPIO4/5** teljesen üresen marad.
+> A **boot-mód** strapping-lábakat (GPIO8, GPIO9) és az USB-lábakat (GPIO12/13)
+> szándékosan **nem** használjuk boot-kritikus bekötéshez. A GPIO8 a beépített RGB
+> LED (csak reseten mintavételezett, kimenetként utána ártalmatlan) — mód-jelzésre
+> használjuk; a GPIO9 a BOOT gomb. A többi strapping-láb — **GPIO4 (MTMS)**, GPIO5
+> (MTDI), GPIO15 — csak a JTAG/SDIO-t állítja, **NEM** a boot-módot, ezért a GPIO4
+> nyugodtan viszi a statikus `IM2` strapet; GPIO5/GPIO15 üresen marad.
 >
-> **Foglalt lábak összegzése:** kijelző 6,7,10,11,18,19 + IM 20 (IM1+IM2 közös);
-> touch 1,2,3,21; I2C 22,23; UART 16,17; RGB LED 8; napelem-ADC 0.
+> **Foglalt lábak összegzése:** kijelző 6,7,10,11,18,19 + IM1 20, IM2 4 (szabad
+> strapping-láb); touch 1,2,3,21; I2C 22,23; UART 16,17; RGB LED 8; napelem-ADC 0.
 > (A **GPIO14 nincs kivezetve** a DevKitC-1-en, ezért nem használjuk.)
 
 ---
@@ -198,10 +209,12 @@ nyers ILI9341 lábnevek** (ezért nem találtál „SCLK"-t!).
 **Két lépés kell:**
 
 **1) Kösd az `IM0..IM3` strap-lábakat soros módra:**
-`IM0→GND, IM3→GND`, majd **`IM1` és `IM2` EGYÜTT a `GPIO20`-ra** (a firmware
-tartja folyamatosan HIGH-on — így nem kell a második 3V3, amiből nincs is, és
-egy láb megmarad a touch `Y-`-nak). Ez kapcsolja a vezérlőt 4-vezetékes soros
-(SPI) módba. Enélkül a SPI vonalak hatástalanok.
+`IM0→GND, IM3→GND`, majd **`IM1`→`GPIO20`** és **`IM2`→`GPIO4`** (mindkettőt a
+firmware tartja folyamatosan HIGH-on — így nem kell a második 3V3, amiből nincs
+is). Minden strap **külön** GPIO-t kap (breadboardon nem lehet két panellábat egy
+vezetékre kötni); az `IM2` a szabad strapping-lábra, a `GPIO4`-re megy, ami nem
+boot-mód strap. Ez kapcsolja a vezérlőt 4-vezetékes soros (SPI) módba. Enélkül a
+SPI vonalak hatástalanok.
 
 **2) Köss a soros jeleket** a tábla feliratai szerint a fenti GPIO-kra:
 
@@ -226,8 +239,9 @@ egy láb megmarad a touch `Y-`-nak). Ez kapcsolja a vezérlőt 4-vezetékes soro
 
 > A leggyakoribb hiba itt: az órajelet az `SDI`/`SDO` közelében keresni. A táblán
 > **a `WR` láb a soros órajel** — kösd azt a GPIO6-ra. A `SDO`-t most **nem**
-> kötjük be (a GPIO2 a touch `Y+`-a lett). Az `IM1`/`IM2` immár **közösen a
-> GPIO20-ra** megy (nem 3V3-ra), a felszabaduló GPIO21 pedig a touch `Y-`-a.
+> kötjük be (a GPIO2 a touch `Y+`-a lett). Az `IM1` a **GPIO20**-ra, az `IM2` a
+> szabad strapping-lábra, a **GPIO4**-re megy (nem 3V3-ra), a touch `Y-` pedig a
+> GPIO21-en van.
 
 **Háttérvilágítás (`LED-A` / `LED-K`):** a panelnek külön anód (`LED-A`) és katód
 (`LED-K`) háttérvilágítás-lába van. Köss **`LED-K`→GND**, és **`LED-A`→3V3 egy kis
@@ -498,8 +512,8 @@ működik.
 | Semmi a konzolon | rossz port / rossz USB csatlakozó | az **USB** (nem UART) portot használd, `idf.py -p ... monitor` |
 | `i2c ... timeout`, szenzor „not found" | rossz SDA/SCL, hiányzó felhúzó, rossz cím | ellenőrizd 22/23-at, tegyél 4,7 kΩ felhúzót, nézd a címet |
 | MPU6050 és DS3231 közül egyik se látszik | `0x68` címütközés | MPU6050 **AD0 → 3V3** (0x69) |
-| Kijelző fehér/üres | nincs IM strap (panel párhuzamos módban), nincs háttérvilágítás, rossz CS/RS/RST | `IM1+IM2→GPIO20` (firmware tartja HIGH), `IM0/IM3→GND`; `LED-A`→3V3 soros R-en; ellenőrizd `CS`=10, `RS`=11, `RST`=18 |
-| Kijelző fehér, pedig IM GPIO-ra van kötve | a `bsp_display_straps_high()` nem futott le a panel reset ELŐTT | ellenőrizd, hogy a `bsp_init()` legelső hívása; a **GPIO20** tényleg a fizikai `IM1` **és** `IM2` lábra megy (mindkettő ugyanoda); mérd meg multiméterrel, hogy 3V3-at ad |
+| Kijelző fehér/üres | nincs IM strap (panel párhuzamos módban), nincs háttérvilágítás, rossz CS/RS/RST | `IM1→GPIO20`, `IM2→GPIO4` (firmware tartja HIGH), `IM0/IM3→GND`; `LED-A`→3V3 soros R-en; ellenőrizd `CS`=10, `RS`=11, `RST`=18 |
+| Kijelző fehér, pedig IM GPIO-ra van kötve | a `bsp_display_straps_high()` nem futott le a panel reset ELŐTT | ellenőrizd, hogy a `bsp_init()` legelső hívása; a **GPIO20** a fizikai `IM1`-re, a **GPIO4** a fizikai `IM2`-re megy; mérd meg multiméterrel, hogy mindkettő 3V3-at ad |
 | Kijelző szemetes/torz | SPI láb felcserélve, vagy az órajelet rossz lábra kötötted | a **soros órajel a `WR` láb → GPIO6** (NEM „SCLK"!); `SDI`→7; nézd át az IM strapeket (4.2) |
 | Kijelző tükrözött/elforgatott | rotáció | `gfx_init()`-ben az `ILI9341_ROT_*` érték állítható |
 | Folyton FAULT (piros) | valós alacsony tápfesz, vagy potméter alul | tekerd a potmétert fel, vagy nézd a VBUS-t |

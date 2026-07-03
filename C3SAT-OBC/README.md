@@ -151,17 +151,20 @@ particular there is **no "SCLK" pin: the serial clock is the `WR` pin**.
 | 11            | LCD DC         | `RS`                 |
 | 18            | LCD RESET      | `RST`                |
 | 19            | Backlight (+)  | `LED-A` (via R/NPN); `LED-K`→GND |
-| 20            | IM1 + IM2 strap HIGH | `IM1` **and** `IM2` tied together (firmware-driven HIGH) |
+| 20            | IM1 strap HIGH | `IM1` (firmware-driven HIGH) |
+| 4             | IM2 strap HIGH | `IM2` (firmware-driven HIGH; spare strapping pin MTMS) |
 
 > ⚠️ **Display SPI strapping (required).** The MikroE TFT Proto defaults to the
 > parallel bus. The interface-mode pins select **4-wire 8-bit serial I**
 > (`IM = 0b0110`): `IM0→GND, IM3→GND`, and **`IM1`, `IM2` are held HIGH by the
-> firmware**. Since both are the same logic level, the panel's `IM1` and `IM2`
-> pins are **tied together to a single GPIO20** — the DevKit exposes only one
-> `3V3` pad, and sharing one GPIO also frees a pin for the touch `Y-` line.
-> `bsp_display_straps_high()` drives it high as the very first step of
-> `bsp_init()` — before the panel leaves reset — so the strap is valid in time.
-> Then wire the serial signals per the table; the clock is `WR`.
+> firmware** — the DevKit exposes only one `3V3` pad. Each strap gets its **own**
+> GPIO (you can't bond two panel pins to one wire on a breadboard): `IM1`→GPIO20
+> (the last free non-strapping pin) and `IM2`→GPIO4. GPIO4 (MTMS) is a spare
+> strapping pin that only steers JTAG/SDIO, **not** the boot mode (only GPIO8/9
+> do), so driving it HIGH never disturbs boot. `bsp_display_straps_high()` drives
+> both high as the very first step of `bsp_init()` — before the panel leaves
+> reset — so the strap is valid in time. Then wire the serial signals per the
+> table; the clock is `WR`.
 >
 > **Touch (implemented):** the panel's bare 4-wire resistive touch (`X+ X- Y+ Y-`)
 > has **no on-board controller IC**, so the firmware reads it directly via the
@@ -176,10 +179,11 @@ particular there is **no "SCLK" pin: the serial clock is the `WR` pin**.
 | 1             | X+     | `X+`             | ADC1_CH1                |
 | 2             | Y+     | `Y+`             | ADC1_CH2 (was MISO)     |
 | 3             | X-     | `X-`             | ADC1_CH3                |
-| 21            | Y-     | `Y-`             | digital drive only (freed by IM sharing) |
+| 21            | Y-     | `Y-`             | digital drive only      |
 
 > Note: GPIO14 is **not** broken out on the ESP32-C6-DevKitC-1 (reserved for the
-> internal flash SPI bus), so `Y-` uses GPIO21, freed by tying IM1+IM2 to one pin.
+> internal flash SPI bus), so `Y-` uses GPIO21. The 6th strap `IM2` moves to the
+> spare strapping pin GPIO4 to keep `Y-` on a clean non-strapping GPIO.
 
 **Sensors — shared I2C bus:**
 
