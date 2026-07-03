@@ -13,4 +13,5 @@ idf_component_register(
         services
         freertos
         esp_timer
+        esp_adc
 )

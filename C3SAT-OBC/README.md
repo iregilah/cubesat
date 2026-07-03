@@ -133,30 +133,37 @@ This is the part most relevant to the role — where each primitive is used and
 
 ### Pin map (single source of truth: `components/bsp/include/bsp_pins.h`)
 
-**Display — SPI only (the DB1..DB16 parallel bus is NOT used):**
+**Display — SPI only (the DB0..DB17 parallel bus is NOT used):**
 
-| ESP32-C6 GPIO | Signal        | ILI9341 pad |
-|---------------|---------------|-------------|
-| 6             | SPI SCLK      | SCL         |
-| 7             | SPI MOSI      | SDI         |
-| 2             | SPI MISO (opt)| SDO         |
-| 10            | LCD CS        | CSX         |
-| 11            | LCD DC        | D/CX        |
-| 18            | LCD RESET     | RESX        |
-| 19            | Backlight     | LED/BL      |
+The board is a MikroE **TFT Proto (MIKROE-495)**; the right column below is the
+board's **silkscreen** label, which differs from the raw ILI9341 pad names — in
+particular there is **no "SCLK" pin: the serial clock is the `WR` pin**.
 
-> ⚠️ **Display SPI strapping.** The MI0283QT-9A's ILI9341 supports several
-> interface modes; the MikroE TFT Proto board defaults to the parallel bus.
-> To use SPI you must strap the controller's interface-mode pins (IM0..IM3) for
-> **4-wire 8-bit serial** and route SDI/SDO/SCL/D-C/CS/RESET to the GPIOs above.
-> Check the board silkscreen/jumpers before wiring — pin positions vary by board
-> revision. The firmware itself is interface-agnostic; only the wiring changes.
+| ESP32-C6 GPIO | Signal         | TFT Proto silkscreen |
+|---------------|----------------|----------------------|
+| 6             | SPI SCLK       | `WR` (= SCL)         |
+| 7             | SPI MOSI       | `SDI`                |
+| 2             | SPI MISO (opt) | `SDO`                |
+| 10            | LCD CS         | `CS`                 |
+| 11            | LCD DC         | `RS`                 |
+| 18            | LCD RESET      | `RST`                |
+| 19            | Backlight (+)  | `LED-A` (via R/NPN); `LED-K`→GND |
+
+> ⚠️ **Display SPI strapping (required).** The MikroE TFT Proto defaults to the
+> parallel bus. Strap the interface-mode pins for **4-wire 8-bit serial I**
+> (`IM = 0b0110`): `IM0→GND, IM1→3V3, IM2→3V3, IM3→GND`. Then wire the serial
+> signals per the table — remember the clock is the `WR` pin. The firmware is
+> interface-agnostic; only the wiring/strapping changes.
+>
+> **Touch:** the panel has a bare 4-wire resistive touch (`X+ X- Y+ Y-` on the
+> header) with **no on-board controller IC**. Touch is a roadmap item (add an
+> XPT2046 on the SPI bus or read via ADC); the dashboard works without it.
 
 **Sensors — shared I2C bus:**
 
 | ESP32-C6 GPIO | Signal | Devices (7-bit addr)                          |
 |---------------|--------|-----------------------------------------------|
-| 22            | SDA    | INA219 0x40, MPU6050 0x68, BME280 0x76, DS3231 0x68 |
+| 22            | SDA    | INA219 0x40, MPU6050 0x69 (AD0→3V3), BME280 0x76, DS3231 0x68 |
 | 23            | SCL    | (add 4.7 kΩ pull-ups to 3V3 if the breakouts lack them) |
 
 **Ground link — UART1** (separate from the USB-Serial-JTAG console):

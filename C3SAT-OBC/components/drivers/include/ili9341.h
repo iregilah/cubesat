@@ -2,8 +2,10 @@
  * @file ili9341.h
  * @brief Minimal ILI9341 panel transport over 4-wire SPI.
  *
- * Drives the MI0283QT-9A (ILI9341) panel of the MikroE TFT Proto board using
- * SPI only — the DB1..DB16 parallel bus is intentionally unused. This module
+ * Drives the MI0283QT-9A (ILI9341) panel of the MikroE TFT Proto (MIKROE-495)
+ * board using SPI only — the DB0..DB17 parallel bus is intentionally unused.
+ * NOTE: the board's serial clock is the silkscreen "WR" pin (no "SCLK" label);
+ * the IM0..IM3 straps must select 4-wire 8-bit serial (see bsp_pins.h). This module
  * is the low-level transport: reset, init sequence, address-window setup and
  * pixel pushing. All shapes/text live in the gfx layer on top of it.
  *
