@@ -5,6 +5,7 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "led_strip.h"
+#include "driver/gpio.h"
 
 static const char *TAG = "bsp";
 
@@ -57,8 +58,28 @@ static void init_led(void)
     led_strip_clear(s_led);
 }
 
+void bsp_display_straps_high(void)
+{
+    /* Configure both strap GPIOs as outputs and latch them HIGH. A GPIO output
+     * holds its level with no further attention, so IM1/IM2 stay high for the
+     * entire runtime. Must run before the panel's reset pulse (ili9341_init). */
+    gpio_config_t io = {
+        .pin_bit_mask = (1ULL << BSP_PIN_LCD_IM1) | (1ULL << BSP_PIN_LCD_IM2),
+        .mode = GPIO_MODE_OUTPUT,
+    };
+    gpio_config(&io);
+    gpio_set_level(BSP_PIN_LCD_IM1, 1);
+    gpio_set_level(BSP_PIN_LCD_IM2, 1);
+    ESP_LOGI(TAG, "ILI9341 IM straps high: IM1=GPIO%d IM2=GPIO%d",
+             BSP_PIN_LCD_IM1, BSP_PIN_LCD_IM2);
+}
+
 obc_err_t bsp_init(void)
 {
+    /* Assert the display interface-mode straps first of all, so the panel sees
+     * a valid IM[3:0] the instant it is released from reset later in boot. */
+    bsp_display_straps_high();
+
     obc_err_t rc = init_nvs();
     if (rc != OBC_OK) {
         return rc;

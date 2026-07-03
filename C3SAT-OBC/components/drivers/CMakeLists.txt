@@ -5,6 +5,7 @@ idf_component_register(
         "mpu6050.c"
         "bme280.c"
         "ds3231.c"
+        "touch.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
@@ -14,5 +15,7 @@ idf_component_register(
         driver
         esp_driver_spi
         esp_driver_gpio
+        esp_adc
         esp_timer
+        freertos
 )

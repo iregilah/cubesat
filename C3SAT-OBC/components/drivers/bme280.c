@@ -16,9 +16,11 @@ static const char *TAG = "bme280";
 #define REG_PRESS_MSB 0xF7   /* burst: press(3) temp(3) hum(2) */
 #define REG_CALIB00   0x88   /* T/P calibration, 26 bytes */
 #define REG_CALIB26   0xE1   /* H calibration, 7 bytes */
-#define CHIP_ID       0x60
+#define CHIP_ID_BME280 0x60  /* BME280: temperature + pressure + humidity. */
+#define CHIP_ID_BMP280 0x58  /* BMP280: temperature + pressure only.        */
 
 static bool s_present;
+static bool s_has_humidity;  /* false on a BMP280 (no humidity channel). */
 
 /* Bosch compensation parameters (read from the device's NVM). */
 static uint16_t dig_T1; static int16_t dig_T2, dig_T3;
@@ -42,6 +44,10 @@ static obc_err_t read_calibration(void)
     dig_P8 = (c[21] << 8) | c[20]; dig_P9 = (c[23] << 8) | c[22];
     dig_H1 = c[25];
 
+    if (!s_has_humidity) {
+        return OBC_OK;   /* BMP280 has no humidity NVM block. */
+    }
+
     uint8_t h[7];
     if (hal_i2c_read_reg(BSP_I2C_ADDR_BME280, REG_CALIB26, h, sizeof h) != OBC_OK) {
         return OBC_ERR_FAIL;
@@ -59,20 +65,25 @@ obc_err_t bme280_init(void)
     uint8_t id = 0;
     if (hal_i2c_probe(BSP_I2C_ADDR_BME280) != OBC_OK ||
         hal_i2c_read_u8(BSP_I2C_ADDR_BME280, REG_ID, &id) != OBC_OK ||
-        id != CHIP_ID) {
+        (id != CHIP_ID_BME280 && id != CHIP_ID_BMP280)) {
         s_present = false;
         ESP_LOGW(TAG, "not found -> simulated thermal");
         return OBC_OK;
     }
+    /* Same register map for T/P; the BMP280 simply lacks the humidity channel. */
+    s_has_humidity = (id == CHIP_ID_BME280);
+
     if (read_calibration() != OBC_OK) {
         s_present = false;
         return OBC_OK;
     }
-    hal_i2c_write_u8(BSP_I2C_ADDR_BME280, REG_CTRL_HUM, 0x01);  /* hum x1 */
+    if (s_has_humidity) {
+        hal_i2c_write_u8(BSP_I2C_ADDR_BME280, REG_CTRL_HUM, 0x01); /* hum x1 */
+    }
     hal_i2c_write_u8(BSP_I2C_ADDR_BME280, REG_CONFIG, 0xA0);    /* tstby 1s */
     hal_i2c_write_u8(BSP_I2C_ADDR_BME280, REG_CTRL_MEAS, 0x27); /* T x1 P x1 normal */
     s_present = true;
-    ESP_LOGI(TAG, "BME280 online");
+    ESP_LOGI(TAG, "%s online", s_has_humidity ? "BME280" : "BMP280");
     return OBC_OK;
 }
 
@@ -136,15 +147,21 @@ obc_err_t bme280_read(bme280_sample_t *out)
         simulate(out);
         return OBC_OK;
     }
+    /* BME280 bursts press(3) temp(3) hum(2); a BMP280 stops after temp. */
     uint8_t d[8];
-    if (hal_i2c_read_reg(BSP_I2C_ADDR_BME280, REG_PRESS_MSB, d, sizeof d) != OBC_OK) {
+    size_t n = s_has_humidity ? 8 : 6;
+    if (hal_i2c_read_reg(BSP_I2C_ADDR_BME280, REG_PRESS_MSB, d, n) != OBC_OK) {
         return OBC_ERR_FAIL;
     }
     int32_t adc_P = (d[0] << 12) | (d[1] << 4) | (d[2] >> 4);
     int32_t adc_T = (d[3] << 12) | (d[4] << 4) | (d[5] >> 4);
-    int32_t adc_H = (d[6] << 8) | d[7];
     out->temperature_c = compensate_T(adc_T); /* sets t_fine first */
     out->pressure_hpa  = compensate_P(adc_P);
-    out->humidity_pct  = compensate_H(adc_H);
+    if (s_has_humidity) {
+        int32_t adc_H = (d[6] << 8) | d[7];
+        out->humidity_pct = compensate_H(adc_H);
+    } else {
+        out->humidity_pct = 0.0f;   /* BMP280: no humidity sensor. */
+    }
     return OBC_OK;
 }

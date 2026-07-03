@@ -31,19 +31,37 @@
  * (ILI9341 datasheet MCU-interface table. Without this the panel stays on the
  * parallel bus and the SPI lines do nothing.)
  *
- * --- Touch panel -----------------------------------------------------------
- * The panel carries a 4-wire RESISTIVE touch (header pins X+, X-, Y+, Y-).
- * There is NO on-board touch controller IC — the raw analog lines come straight
- * to the header. To use touch you must either add an external touch controller
- * (XPT2046/ADS7843/TSC2046) on the SPI bus, or read the panel directly with the
- * ESP32 ADC + GPIO drive-switching. Touch is a roadmap item and is NOT wired or
- * driven by this firmware yet (see the BSP_PIN_TOUCH_* placeholders below).
+ * The ESP32-C6 DevKit has only ONE 3V3 pin, which is already needed for the
+ * panel/sensor VCC rails. So instead of soldering IM1 and IM2 to a 3V3 rail,
+ * this firmware drives them from two GPIOs that are held permanently HIGH for
+ * the whole runtime (bsp_display_straps_high(), called first thing in
+ * bsp_init(), i.e. BEFORE the panel is released from reset so the strap is
+ * valid when the ILI9341 latches its interface mode). IM0/IM3 stay hard-wired
+ * to GND (GND pins are plentiful).
  *
- * The MISO/SDO line is optional (only needed for register read-back).
+ * --- Touch panel (NOW DRIVEN) ----------------------------------------------
+ * The panel carries a 4-wire RESISTIVE touch (header pins X+, X-, Y+, Y-) with
+ * NO on-board controller IC — the raw analog lines come straight to the header.
+ * We read it directly with the ESP32-C6 ADC + GPIO drive-switching (no external
+ * XPT2046 needed): to read one axis we drive that plate's two rails as digital
+ * out (one HIGH, one LOW) and sample the opposite plate with the ADC. Three of
+ * the four touch lines therefore sit on ADC1-capable pins (GPIO1/2/3); the 4th
+ * is a plain digital drive line. See components/drivers/touch.c.
+ *
+ * --- Pin budget note: MISO/SDO is intentionally dropped ---------------------
+ * The ESP32-C6-WROOM-1 has very few free, non-strapping, non-USB GPIOs. After
+ * the display control + I2C + UART + status LED + solar ADC, only GPIO1, 3, 14,
+ * 20, 21 remain safely free — five pins, but we need six (4 touch + 2 IM). Since
+ * this firmware NEVER reads back from the panel, the optional SDO/MISO line is
+ * unnecessary: we free GPIO2 (an ADC1 pin, ideal for touch) by leaving MISO
+ * unconnected (BSP_PIN_SPI_MISO = -1). Leave the panel's SDO pin unwired.
  * =========================================================================
  *
- * All ESP32-C6 strapping pins (GPIO8, GPIO9, GPIO15) and the USB-Serial-JTAG
- * pins (GPIO12 = D-, GPIO13 = D+) are deliberately avoided for peripherals.
+ * The ESP32-C6 strapping pins (GPIO4, GPIO5, GPIO8, GPIO9, GPIO15) and the
+ * USB-Serial-JTAG pins (GPIO12 = D-, GPIO13 = D+) are deliberately kept free of
+ * boot-critical wiring. GPIO8 carries the on-board RGB LED (only sampled at
+ * reset, harmless as an output afterwards); GPIO4/5 are left entirely unused so
+ * their reset-time level can never disturb the boot mode.
  */
 #ifndef BSP_PINS_H
 #define BSP_PINS_H
@@ -53,26 +71,36 @@
 #define BSP_SPI_HOST        SPI2_HOST
 #define BSP_PIN_SPI_SCLK    6   /**< -> TFT Proto "WR" pin (=SCL; NO "SCLK" exists) */
 #define BSP_PIN_SPI_MOSI    7   /**< -> TFT Proto "SDI" (serial data in) */
-#define BSP_PIN_SPI_MISO    2   /**< <- TFT Proto "SDO" (serial data out, optional) */
+#define BSP_PIN_SPI_MISO    (-1)/**< SDO/MISO dropped to free GPIO2 for touch (see note). */
 #define BSP_PIN_LCD_CS      10  /**< -> TFT Proto "CS"  (active low) */
 #define BSP_PIN_LCD_DC      11  /**< -> TFT Proto "RS"  (D/CX data/command select) */
 #define BSP_PIN_LCD_RST     18  /**< -> TFT Proto "RST" (active low) */
 #define BSP_PIN_LCD_BL      19  /**< -> TFT Proto "LED-A" backlight (via series R/NPN);
                                  *      "LED-K" -> GND. Active high. */
 
+/* Interface-mode straps, driven HIGH by GPIO for the whole runtime (see the
+ * header comment). Held high == logic 1 == IM1=IM2=1 for "4-wire serial I". */
+#define BSP_PIN_LCD_IM1     20  /**< -> TFT Proto "IM1", held HIGH by firmware. */
+#define BSP_PIN_LCD_IM2     21  /**< -> TFT Proto "IM2", held HIGH by firmware. */
+
 #define BSP_LCD_SPI_HZ      (40 * 1000 * 1000) /**< 40 MHz pixel clock. */
 #define BSP_LCD_WIDTH       320
 #define BSP_LCD_HEIGHT      240
 
-/* ---- Resistive touch panel (ROADMAP — not yet wired or driven) -----------*/
-/* The TFT Proto exposes the bare 4-wire resistive lines (X+, X-, Y+, Y-) on the
- * header; there is NO touch controller IC on the board. Assign real GPIOs here
- * only when implementing touch (external XPT2046 on the SPI bus, or direct ADC
- * sensing). Left undefined on purpose so nothing claims these pins today. */
-/* #define BSP_PIN_TOUCH_XP   <gpio>  // TFT Proto "X+" */
-/* #define BSP_PIN_TOUCH_XM   <gpio>  // TFT Proto "X-" */
-/* #define BSP_PIN_TOUCH_YP   <gpio>  // TFT Proto "Y+" */
-/* #define BSP_PIN_TOUCH_YM   <gpio>  // TFT Proto "Y-" */
+/* ---- Resistive touch panel (4-wire, driven directly by the ESP32 ADC) -----*/
+/* TFT Proto header lines X+, X-, Y+, Y- -> ESP32-C6 GPIOs. Three sit on ADC1
+ * channels so either plate can be sampled; Y- is a plain digital drive line.
+ * The ADC_CHANNEL_x values below MUST match the GPIO (ESP32-C6: ADC1_CHn = GPIOn
+ * for n=0..6). Read/tuning logic + calibration live in drivers/touch.c. */
+#define BSP_PIN_TOUCH_XP    1   /**< TFT Proto "X+"  (ADC1_CH1, analog read). */
+#define BSP_PIN_TOUCH_YP    2   /**< TFT Proto "Y+"  (ADC1_CH2, analog read; was MISO). */
+#define BSP_PIN_TOUCH_XM    3   /**< TFT Proto "X-"  (ADC1_CH3, analog read + drive). */
+#define BSP_PIN_TOUCH_YM    14  /**< TFT Proto "Y-"  (digital drive only). */
+
+#define BSP_TOUCH_ADC_UNIT  ADC_UNIT_1
+#define BSP_TOUCH_CH_XP     ADC_CHANNEL_1  /**< must match BSP_PIN_TOUCH_XP. */
+#define BSP_TOUCH_CH_YP     ADC_CHANNEL_2  /**< must match BSP_PIN_TOUCH_YP. */
+#define BSP_TOUCH_CH_XM     ADC_CHANNEL_3  /**< must match BSP_PIN_TOUCH_XM. */
 
 /* ---- I2C bus (sensors: EPS / ADCS / thermal / RTC) -----------------------*/
 #define BSP_I2C_PORT        0

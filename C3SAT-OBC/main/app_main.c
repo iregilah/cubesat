@@ -31,6 +31,7 @@
 #include "telecommand.h"
 #include "subsystems.h"
 #include "gui.h"
+#include "touch.h"
 
 static const char *TAG = "main";
 
@@ -60,9 +61,11 @@ void app_main(void)
     CHECK(storage_init(), "storage_init");
     CHECK(fdir_init(), "fdir_init");
     CHECK(mode_manager_init(), "mode_manager_init");
+    CHECK(touch_init(), "touch_init");           /* touch ADC + tap queue */
 
     /* --- 3. create tasks --- */
     CHECK(fdir_start(), "fdir_start");           /* safety net first */
+    CHECK(touch_start(), "touch_start");         /* feeds taps to the GUI */
     CHECK(gui_start(), "gui_start");
     CHECK(eps_start(), "eps_start");
     CHECK(adcs_start(), "adcs_start");

@@ -90,7 +90,8 @@ about and review.
 | `eps`       | mid         | 250 ms   | Power monitoring, SoC, load shedding                |
 | `thermal`   | mid         | 1 s      | Temperature, heater hysteresis                      |
 | `storage`   | low-mid     | event    | Drains telemetry queue → flash log                  |
-| `gui`       | low         | 100 ms   | Dashboard repaint (never blocks RT tasks)           |
+| `touch`     | low         | 20 ms    | Samples 4-wire resistive panel → tap queue          |
+| `gui`       | low         | 100 ms   | Dashboard + touch menu repaint (never blocks RT tasks) |
 
 ### FreeRTOS concept map
 
@@ -104,9 +105,11 @@ This is the part most relevant to the role — where each primitive is used and
 - **Event group** (`obc_state.c`): doubles as a **startup barrier**
   (`app_main` waits for `EVT_ALL_READY`) and a **change-notification** channel
   (`EVT_MODE_CHANGED` lets the GUI repaint lazily instead of polling).
-- **Queues** (`obc_state.c`, `telemetry.c`): decouple producers from consumers —
-  command queue (uplink → CDH), event queue (any task → GUI log), telemetry log
-  queue (subsystems → storage), so a slow flash write never stalls a control loop.
+- **Queues** (`obc_state.c`, `telemetry.c`, `touch.c`): decouple producers from
+  consumers — command queue (uplink → CDH), event queue (any task → GUI log),
+  telemetry log queue (subsystems → storage), and a **tap queue** (time-sensitive
+  50 Hz touch sampling → the lazier 10 Hz GUI), so a slow flash write or a screen
+  repaint never stalls a control loop or drops an input.
 - **Software watchdog + HW Task WDT** (`fdir.c`): subsystems check in each loop;
   a missed heartbeat latches a fault and forces SAFE mode; a hung FDIR itself is
   caught by the ESP-IDF Task Watchdog and reboots the OBC.
@@ -126,7 +129,7 @@ This is the part most relevant to the role — where each primitive is used and
 | MikroE TFT Proto (MI0283QT-9A / ILI9341, 320×240) | Dashboard   | recommended |
 | INA219 breakout                    | EPS power monitor          | optional (simulated) |
 | MPU6050 breakout                   | ADCS IMU                   | optional (simulated) |
-| BME280 breakout                    | Thermal sensor             | optional (simulated) |
+| BME280 **or BMP280** breakout      | Thermal sensor (auto-detected by chip ID) | optional (simulated) |
 | DS3231 breakout                    | Mission clock RTC          | optional (simulated) |
 | 10 kΩ potentiometer                | Manual "solar input" → ADC | optional  |
 | USB-UART adapter                   | Ground-station link        | optional  |
@@ -143,21 +146,36 @@ particular there is **no "SCLK" pin: the serial clock is the `WR` pin**.
 |---------------|----------------|----------------------|
 | 6             | SPI SCLK       | `WR` (= SCL)         |
 | 7             | SPI MOSI       | `SDI`                |
-| 2             | SPI MISO (opt) | `SDO`                |
+| —             | SPI MISO       | `SDO` (unconnected — freed GPIO2 for touch) |
 | 10            | LCD CS         | `CS`                 |
 | 11            | LCD DC         | `RS`                 |
 | 18            | LCD RESET      | `RST`                |
 | 19            | Backlight (+)  | `LED-A` (via R/NPN); `LED-K`→GND |
+| 20            | IM1 strap HIGH | `IM1` (firmware-driven 3V3) |
+| 21            | IM2 strap HIGH | `IM2` (firmware-driven 3V3) |
 
 > ⚠️ **Display SPI strapping (required).** The MikroE TFT Proto defaults to the
-> parallel bus. Strap the interface-mode pins for **4-wire 8-bit serial I**
-> (`IM = 0b0110`): `IM0→GND, IM1→3V3, IM2→3V3, IM3→GND`. Then wire the serial
-> signals per the table — remember the clock is the `WR` pin. The firmware is
-> interface-agnostic; only the wiring/strapping changes.
+> parallel bus. The interface-mode pins select **4-wire 8-bit serial I**
+> (`IM = 0b0110`): `IM0→GND, IM3→GND`, and **`IM1`, `IM2` are held HIGH by the
+> firmware** on GPIO20/21. The DevKit exposes only one `3V3` pad, so rather than
+> daisy-chaining, `bsp_display_straps_high()` drives both IM pins high as the very
+> first step of `bsp_init()` — before the panel leaves reset — so the straps are
+> valid in time. Then wire the serial signals per the table; the clock is `WR`.
 >
-> **Touch:** the panel has a bare 4-wire resistive touch (`X+ X- Y+ Y-` on the
-> header) with **no on-board controller IC**. Touch is a roadmap item (add an
-> XPT2046 on the SPI bus or read via ADC); the dashboard works without it.
+> **Touch (implemented):** the panel's bare 4-wire resistive touch (`X+ X- Y+ Y-`)
+> has **no on-board controller IC**, so the firmware reads it directly via the
+> ESP32-C6 ADC + GPIO drive-switching (`drivers/touch.c`). A dedicated 50 Hz
+> `touch` task posts taps to a queue drained by the `gui` task. Set
+> `TOUCH_SIMULATE 1` in `touch.h` to script a menu tour with no panel wired.
+
+**Touch — 4-wire resistive (read via ADC, no controller IC):**
+
+| ESP32-C6 GPIO | Signal | TFT Proto header | Note                    |
+|---------------|--------|------------------|-------------------------|
+| 1             | X+     | `X+`             | ADC1_CH1                |
+| 2             | Y+     | `Y+`             | ADC1_CH2 (was MISO)     |
+| 3             | X-     | `X-`             | ADC1_CH3                |
+| 14            | Y-     | `Y-`             | digital drive only      |
 
 **Sensors — shared I2C bus:**
 
@@ -214,6 +232,30 @@ ready, and the satellite transition `BOOT → SAFE → NOMINAL` once the simulat
 battery recovers and the (simulated) tumble damps out. Faults injected by the
 simulation (e.g. a low-voltage dip) demote the craft back to SAFE automatically.
 
+### Display & touch menu
+
+The panel is both a live dashboard and an interactive control surface. Tap the
+header button (top-right) to toggle between the dashboard and the menu; from the
+menu the same button reads **BACK**.
+
+| View          | How you get there        | What it shows                                   |
+|---------------|--------------------------|-------------------------------------------------|
+| **Dashboard** | default / BACK from menu | Mode banner, EPS/ADCS/thermal panels, last 5 events |
+| **Menu**      | tap **MENU**             | SENSORS, MODE CTRL, EVENT LOG, ABOUT, BACKLIGHT |
+| **Sensors**   | Menu → SENSORS           | Per-sensor ONLINE/SIMULATED + live values       |
+| **Mode ctrl** | Menu → MODE CTRL         | SAFE / NOMINAL / PAYLOAD request buttons        |
+| **Event log** | Menu → EVENT LOG         | Last 14 system events                           |
+| **About**     | Menu → ABOUT             | Boot count, uptime, free heap, C3S link         |
+
+Mode buttons don't force a transition directly — they enqueue a `SET_MODE`
+telecommand onto the same command queue the ground link uses, so the mode
+manager and FDIR keep final authority (a touch can request PAYLOAD, but FDIR can
+still veto it back to SAFE). This mirrors how a real ground command is handled.
+
+No panel wired? Set `TOUCH_SIMULATE 1` in `components/drivers/include/touch.h`
+and the firmware injects a scripted tap tour so the whole menu is demoable
+headless.
+
 ### Ground station
 
 ```bash
@@ -266,11 +308,12 @@ C3SAT-OBC/
 │   ├── obc_common/           shared types, central config, error codes
 │   ├── bsp/                  pin map, NVS boot counter, status LED
 │   ├── hal/                  thread-safe I2C + SPI bus wrappers
-│   ├── drivers/              ili9341, ina219, mpu6050, bme280, ds3231 (+sim)
+│   ├── drivers/              ili9341, ina219, mpu6050, bme280/bmp280, ds3231,
+│   │                         touch (4-wire resistive via ADC)  (+sim)
 │   ├── services/             obc_state, telemetry, telecommand, storage,
 │   │   └── test/             clock, fdir, mode_manager  (+ Unity tests)
 │   ├── subsystems/           eps, adcs, thermal, cdh tasks
-│   └── ui/                   gfx primitives + 5x7 font + dashboard task
+│   └── ui/                   gfx primitives + 5x7 font + dashboard/menu task
 └── tools/
     └── groundstation.py      host-side uplink/downlink tool
 ```
@@ -284,8 +327,8 @@ a reference:
 
 - **CAN bus** subsystem link (the role lists CAN) — add a `twai` driver and
   route inter-subsystem telemetry over it instead of the in-RAM blackboard.
-- Touch input on the panel (the ILI9341 board has a touch controller) to drive
-  the dashboard interactively.
+- On-screen **touch calibration** routine (persist `TOUCH_CAL_*` to NVS instead
+  of the compile-time defaults in `touch.h`).
 - Real **CCSDS** Space Packet headers + a small command authentication MAC.
 - A proper **B-dot detumble** control law driving simulated magnetorquers.
 - Host-target (`linux`) build of the codec + autonomy logic for CI without

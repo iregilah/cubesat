@@ -11,4 +11,5 @@ idf_component_register(
         drivers
         services
         freertos
+        esp_system
 )

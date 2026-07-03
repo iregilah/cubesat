@@ -7,6 +7,7 @@ idf_component_register(
         obc_common
         bsp
         hal
+        drivers
         services
         subsystems
         ui

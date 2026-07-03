@@ -84,7 +84,7 @@ kötöd, ott írd át.
 |---|---|---|
 | 6  | SPI órajel (SCLK) | **`WR`** (= SCL — NEM „SCLK"!) |
 | 7  | SPI adat ki (MOSI) | **`SDI`** |
-| 2  | SPI adat be (MISO, opcionális) | **`SDO`** |
+| —  | SPI adat be (MISO) | **`SDO`** — **bekötetlen** (a GPIO2-t a touch kapja) |
 | 10 | LCD CS | **`CS`** |
 | 11 | LCD D/C | **`RS`** |
 | 18 | LCD RESET | **`RST`** |
@@ -93,29 +93,55 @@ kötöd, ott írd át.
 | 3V3 | táp | **`3.3V`** |
 | GND | föld | **`GND`** |
 
-#### Interfész-mód strappelés — KÖTELEZŐ a SPI-hoz ⚠️
+> **Miért nincs MISO?** Ez a firmware sosem olvas vissza a panelről, a `SDO`
+> csak regiszter-visszaolvasáshoz kellene. Az ESP32-C6-WROOM-1-en viszont
+> kevés a szabad, nem-strapping, nem-USB láb, és 6 kell (4 touch + 2 IM). Ezért
+> a **`SDO`-t szándékosan bekötetlenül hagyjuk**, és a felszabaduló **GPIO2-t**
+> (ami ADC-képes, ideális a touch-hoz) használjuk. A kép ettől bitre ugyanúgy
+> rajzolódik.
+
+#### Interfész-mód strappelés — KÖTELEZŐ a SPI-hoz ⚠️ (most GPIO hajtja)
 
 A panel alapból a párhuzamos buszra van állítva. SPI-hoz az **`IM0..IM3`** lábakat
-kell strappelni „4-vezetékes 8-bites soros I" módra (ILI9341 = `IM[3:0] = 0b0110`):
+kell „4-vezetékes 8-bites soros I" módra állítani (ILI9341 = `IM[3:0] = 0b0110`).
+Mivel a DevKiten **csak egy 3V3 láb van** (kell a panel/szenzor VCC-hez), az
+`IM1`/`IM2`-t **nem** kötjük 3V3 sínre, hanem **két GPIO tartja folyamatosan
+magasban** az egész futás alatt (a firmware `bsp_display_straps_high()`-ban
+állítja be, még a panel reset előtt, így a strap érvényes, amikor az ILI9341
+belövi az interfész-módot). `IM0`/`IM3` marad GND-n (GND láb van bőven).
 
 | TFT Proto láb | Hova kösd | Bit |
 |---|---|---|
 | **`IM0`** | **GND** | 0 |
-| **`IM1`** | **3V3** | 1 |
-| **`IM2`** | **3V3** | 1 |
+| **`IM1`** | **GPIO20** (firmware tartja HIGH) | 1 |
+| **`IM2`** | **GPIO21** (firmware tartja HIGH) | 1 |
 | **`IM3`** | **GND** | 0 |
 
 Strappelés nélkül a kijelző a párhuzamos buszon marad, és a SPI vonalak **nem
 csinálnak semmit** (fehér/üres kép).
 
-#### Érintőképernyő (nyers rezisztív — egyelőre roadmap)
+#### Érintőképernyő (4-vezetékes rezisztív — MOST MŰKÖDIK) 👆
 
-A panel egy **4-vezetékes rezisztív** érintőfelülettel van fedve, aminek a nyers
-analóg vonalai (**`X+`, `X-`, `Y+`, `Y-`**) közvetlenül a fejlécre jönnek ki.
-**Nincs a táblán érintővezérlő IC.** Az érintés használatához vagy egy külső
-vezérlőt (XPT2046/ADS7843/TSC2046) teszel a SPI buszra, vagy az ESP32 ADC-jével
-+ GPIO-átkapcsolással olvasod közvetlenül. Ezt a firmware **még nem hajtja meg**
-(lásd a roadmapet) — a kijelző grafika enélkül is teljesen működik.
+A panel **4-vezetékes rezisztív** érintőfelülettel van fedve; a nyers analóg
+vonalak (**`X+`, `X-`, `Y+`, `Y-`**) közvetlenül a fejlécre jönnek ki, **nincs a
+táblán érintővezérlő IC** (nem kell XPT2046). A firmware közvetlenül olvassa az
+**ESP32-C6 ADC-jével + GPIO-átkapcsolással**: egy tengely olvasásához az adott
+réteg két szélét digitális kimenetként meghajtja (egyik HIGH, másik LOW), és a
+szemközti réteget ADC-vel mintavételezi. Ezért 3 vonal ADC-képes lábon ül.
+
+| ESP32-C6 GPIO | Touch vonal | ADC | Szerep |
+|---|---|---|---|
+| 1  | **`X+`** | ADC1_CH1 | analóg mintavétel |
+| 2  | **`Y+`** | ADC1_CH2 | analóg mintavétel (ez a volt-MISO láb) |
+| 3  | **`X-`** | ADC1_CH3 | analóg mintavétel + meghajtás |
+| 14 | **`Y-`** | —        | csak digitális meghajtás |
+
+> A leképezés (nyers ADC → képpont) a `components/drivers/touch.h`
+> `TOUCH_CAL_*` konstansaiban van; panel-/bekötésfüggő, **kalibráld a saját
+> hardveredre** (lásd a 10. pont hibakeresését). Ha nincs touch panel bekötve,
+> a nyomás-kapu (pull-down) miatt a rendszer nyugton marad — nem lesz fantom
+> érintés. Touch panel nélkül a menü a `TOUCH_SIMULATE 1` kapcsolóval mutatható
+> be (a touch task ilyenkor szkriptelt koppintásokkal végigjárja a menüt).
 
 ### Szenzorok — közös I2C busz
 
@@ -139,9 +165,13 @@ vezérlőt (XPT2046/ADS7843/TSC2046) teszel a SPI buszra, vagy az ESP32 ADC-jév
 | 16 | TX (a hídnak) |
 | 17 | RX (a hídtól) |
 
-> Az alábbi lábakat szándékosan **nem** használjuk perifériához: GPIO8/9/15
-> (strapping), GPIO12/13 (USB). A GPIO8 a beépített RGB LED — ezt mód-jelzésre
-> használjuk.
+> Az alábbi lábakat szándékosan **nem** használjuk boot-kritikus bekötéshez:
+> GPIO4/5/8/9/15 (strapping), GPIO12/13 (USB). A GPIO8 a beépített RGB LED
+> (csak reseten mintavételezett, kimenetként utána ártalmatlan) — ezt
+> mód-jelzésre használjuk. A **GPIO4/5** teljesen üresen marad.
+>
+> **Foglalt lábak összegzése:** kijelző 6,7,10,11,18,19 + IM 20,21; touch
+> 1,2,3,14; I2C 22,23; UART 16,17; RGB LED 8; napelem-ADC 0.
 
 ---
 
@@ -161,9 +191,11 @@ nyers ILI9341 lábnevek** (ezért nem találtál „SCLK"-t!).
 
 **Két lépés kell:**
 
-**1) Strappeld az `IM0..IM3` lábakat soros módra** (lásd a 3. pont IM-táblázatát):
-`IM0→GND, IM1→3V3, IM2→3V3, IM3→GND`. Ez kapcsolja a vezérlőt 4-vezetékes
-soros (SPI) módba. Enélkül a SPI vonalak hatástalanok.
+**1) Kösd az `IM0..IM3` strap-lábakat soros módra:**
+`IM0→GND, IM3→GND`, majd **`IM1→GPIO20` és `IM2→GPIO21`** (ezeket a firmware
+tartja folyamatosan HIGH-on — így nem kell a második 3V3, amiből nincs is). Ez
+kapcsolja a vezérlőt 4-vezetékes soros (SPI) módba. Enélkül a SPI vonalak
+hatástalanok.
 
 **2) Köss a soros jeleket** a tábla feliratai szerint a fenti GPIO-kra:
 
@@ -171,15 +203,25 @@ soros (SPI) módba. Enélkül a SPI vonalak hatástalanok.
 |---|---|
 | **`WR`** (= a Soros órajel!) | 6 |
 | **`SDI`** | 7 |
-| **`SDO`** (opcionális) | 2 |
+| **`SDO`** | — (**hagyd bekötetlenül**, a GPIO2 a touché) |
 | **`RS`** | 11 |
 | **`CS`** | 10 |
 | **`RST`** | 18 |
 | **`3.3V`** / **`GND`** | 3V3 / GND |
 
+**3) Köss az érintő 4 vonalát** (ha használni akarod a menüt):
+
+| TFT Proto felirat | ESP32-C6 GPIO |
+|---|---|
+| **`X+`** | 1 |
+| **`Y+`** | 2 |
+| **`X-`** | 3 |
+| **`Y-`** | 14 |
+
 > A leggyakoribb hiba itt: az órajelet az `SDI`/`SDO` közelében keresni. A táblán
-> **a `WR` láb a soros órajel** — kösd azt a GPIO6-ra. A `SDO` (MISO) vonal
-> opcionális (csak regiszter-visszaolvasáshoz kell); enélkül is rajzol a kép.
+> **a `WR` láb a soros órajel** — kösd azt a GPIO6-ra. A `SDO`-t most **nem**
+> kötjük be (a GPIO2 a touch `Y+`-a lett). Az `IM1`/`IM2` immár GPIO20/21-re megy,
+> nem 3V3-ra.
 
 **Háttérvilágítás (`LED-A` / `LED-K`):** a panelnek külön anód (`LED-A`) és katód
 (`LED-K`) háttérvilágítás-lába van. Köss **`LED-K`→GND**, és **`LED-A`→3V3 egy kis
@@ -283,12 +325,67 @@ I (...) cdh: beacon: mode=2 V=3.95 SoC=79% T=21.5C rate=2.1 f=0x00
 - Kb. **10 másodpercenként** egy FDIR egészség-sor: `tasks=.. free-heap=..`.
 
 ### C) Kijelző — a dashboard
-Sötét háttér, sárga **C3SAT-OBC** fejléc, jobbra a **mód-szalag** (NOMINAL = zöld).
-Panelek: **EPS POWER** (VBUS, IBUS, SoC sáv), **ADCS ATTITUDE** (RATE, RPY,
-DETUMBLED/TUMBLING), **THERMAL** (T, P, HEATER), **FAULTS** (ALL NOMINAL zölden),
-és alul az **EVENT LOG** (görgő üzenetek, pl. „BOOT complete", „MODE BOOT->SAFE").
+Sötét háttér, sárga **C3SAT-OBC** fejléc, középen a **mód-szalag** (NOMINAL =
+zöld), a **jobb felső sarokban a `MENU` gomb**. Panelek: **EPS POWER** (VBUS,
+IBUS, SoC sáv), **ADCS ATTITUDE** (RATE, RPY, DETUMBLED/TUMBLING), **THERMAL**
+(T, P, HEATER), **FAULTS** (ALL NOMINAL zölden), és alul az **EVENT LOG** (görgő
+üzenetek, pl. „BOOT complete", „MODE BOOT->SAFE").
 
-Ha mindezt látod, az alaprendszer **bizonyítottan fut**.
+Ha mindezt látod, az alaprendszer **bizonyítottan fut**. Az érintőmenü
+használatát lásd a **7.5 pontban**.
+
+---
+
+## 7.5 Az érintőképernyős menü — mikor mit látsz, és hogyan használd
+
+A kijelző egy **nézet-állapotgép** (view state machine). Minden nézet tetején
+ugyanaz a fejléc: bal oldalt a cím, jobb felül egy gomb, ami a **dashboardon
+`MENU`**, minden más nézetben **`BACK`**. Egy koppintás mindig a gomb közepére a
+legbiztosabb.
+
+**Hogyan működik belül (FreeRTOS):** egy külön **`touch` task** 50 Hz-en
+mintavételezi az érintőt, pergésmentesít, a nyers ADC-t képpontra konvertálja,
+és **koppintásonként egy üzenetet tesz egy FreeRTOS queue-ba**. A `gui` task ezt
+a queue-t üríti minden képkockában, és a koppintást a nézet gombjaira illeszti.
+Így a (időzítésre érzékeny) beolvasás és a rajzolás **szét van választva** — ez
+a queue-alapú, task-ok közti kommunikáció iskolapéldája (ezért van értelme itt
+külön tasknak, nem a GUI-ból pollozunk).
+
+### A nézetek
+
+| Nézet | Hogyan jutsz ide | Mit látsz |
+|---|---|---|
+| **DASHBOARD** | induláskor ez az alap; bármely nézetből `BACK` → `MENU` → `BACK` | a teljes műszerfal (7/C), jobb felül `MENU` |
+| **MENU** | dashboard `MENU` gomb | 5 nagy gomb: `SENSORS`, `MODE CTRL`, `EVENT LOG`, `ABOUT`, `BACKLIGHT ON/OFF` |
+| **SENSORS** | MENU → `SENSORS` | I2C busz-állapot (INA219/MPU6050/BMx280/DS3231 = **ONLINE** zölden vagy **SIMULATED** narancs) + élő értékek a blackboardról |
+| **MODE CTRL** | MENU → `MODE CTRL` | 3 gomb: `SAFE` / `NOMINAL` / `PAYLOAD`; alul „NOW: <mód>”, az aktív gomb kiemelve |
+| **EVENT LOG** | MENU → `EVENT LOG` | teljes képernyős, görgő eseménynapló (14 sor) |
+| **ABOUT** | MENU → `ABOUT` | projekt-infó: boot-szám, uptime, szabad heap, a C3S link |
+
+### Navigáció lépésről lépésre (amit látnod kell)
+
+1. **Bekapcsolás után** a **DASHBOARD** jön be. Jobb felül ott a **`MENU`** gomb.
+2. Koppints a **`MENU`**-re → megjelenik az **5 gombos főmenü**.
+3. Koppints a **`SENSORS`**-ra → látod, melyik szenzor **ONLINE** (zöld) és melyik
+   **SIMULATED** (narancs). Ha csak a **BMP280**-at kötötted be, a `BMx280` sor
+   **ONLINE**, a többi **SIMULATED**. Lejjebb élő EPS/ADCS/THRM értékek.
+   Ujjal melegítve a BMP280-at a `THRM ... C` érték emelkedik — **élőben** látod.
+4. **`BACK`** (jobb felül) → vissza a menübe. **`MODE CTRL`** → 3 mód-gomb. Koppints
+   pl. **`PAYLOAD`**-ra: a queue-n át a CDH kapja a parancsot (mint egy földi
+   telekomand), az „NOW:" mező **PAYLOAD**-ra vált, és az EVENT LOG-ban megjelenik
+   `UI req mode PAYLOAD`. **Fontos:** ha aktív hiba van, az FDIR **visszaránthat
+   SAFE-be** — ez helyes (az autonómia felülbírálja a menüt).
+5. **`EVENT LOG`** → a teljes napló; **`ABOUT`** → projekt-infó; **`BACKLIGHT`** →
+   ki/be kapcsolja a háttérvilágítást (a gomb felirata mutatja az állapotot,
+   a menüben maradsz).
+6. **`BACK`** a menüből → vissza a **DASHBOARD**-ra.
+
+### Ha nincs érintőpanel bekötve
+A menü nem nyílik meg magától (nincs bemenet) — ez normális, a dashboard fut.
+Ha **touch panel nélkül** akarod bemutatni a menüt, fordítsd `1`-re a
+`components/drivers/touch.h` `TOUCH_SIMULATE` makróját: ekkor a `touch` task
+~3,5 mp-enként **szkriptelt koppintásokkal** végigjárja a menüt (MENU → SENSORS
+→ MODE CTRL → ABOUT → vissza), így minden nézet magától megmutatkozik.
 
 ---
 
@@ -396,11 +493,16 @@ működik.
 | `i2c ... timeout`, szenzor „not found" | rossz SDA/SCL, hiányzó felhúzó, rossz cím | ellenőrizd 22/23-at, tegyél 4,7 kΩ felhúzót, nézd a címet |
 | MPU6050 és DS3231 közül egyik se látszik | `0x68` címütközés | MPU6050 **AD0 → 3V3** (0x69) |
 | Kijelző fehér/üres | nincs IM strap (panel párhuzamos módban), nincs háttérvilágítás, rossz CS/RS/RST | strappeld `IM0→GND, IM1/IM2→3V3, IM3→GND`; `LED-A`→3V3 soros R-en; ellenőrizd `CS`=10, `RS`=11, `RST`=18 |
+| Kijelző fehér, pedig IM1/IM2 GPIO-ra van kötve | a `bsp_display_straps_high()` nem futott le a panel reset ELŐTT | ellenőrizd, hogy a `bsp_init()` legelső hívása; GPIO20/21 tényleg a fizikai IM1/IM2 lábra megy; mérd meg multiméterrel, hogy 3V3-at ad |
 | Kijelző szemetes/torz | SPI láb felcserélve, vagy az órajelet rossz lábra kötötted | a **soros órajel a `WR` láb → GPIO6** (NEM „SCLK"!); `SDI`→7; nézd át az IM strapeket (4.2) |
 | Kijelző tükrözött/elforgatott | rotáció | `gfx_init()`-ben az `ILI9341_ROT_*` érték állítható |
 | Folyton FAULT (piros) | valós alacsony tápfesz, vagy potméter alul | tekerd a potmétert fel, vagy nézd a VBUS-t |
 | `groundstation` nem lát semmit | rossz soros port / nem a „UART" portra kötve | a 2. USB-C-t a **UART** portba; helyes `--port` |
 | Boot-loop / brownout | háttérvilágítás/kijelző túl sok áram | külön 3V3 táp a kijelzőnek, vagy erősebb USB-port |
+| Érintés nem reagál | rossz 4-vezetékes bekötés, vagy túl magas `TOUCH_Z_THRESHOLD` | ellenőrizd `X+`=1, `Y+`=2, `X-`=3, `Y-`=14; csökkentsd a `TOUCH_Z_THRESHOLD`-ot a `touch.h`-ban |
+| Érintés van, de rossz helyre üt | kalibráció / orientáció | állítsd a `TOUCH_CAL_*_MIN/MAX` és `TOUCH_INVERT_X/Y`, `TOUCH_SWAP_XY` értékeket a `touch.h`-ban (nézd a soros logban a nyers rx/ry-t) |
+| „Fantom" érintések panel nélkül | nyitott ADC-lábak lebegnek | a `read_z_raw` belső pulldownnal védve; ha mégis van, tesztelj `TOUCH_SIMULATE 1`-gyel (nincs ADC-olvasás) |
+| Menü nem nyílik, csak a dashboard | touch task nem indult, vagy üres a tap-queue | nézd a logban a `touch ADC ready` sort; ellenőrizd hogy `touch_start()` lefutott az `app_main`-ben |
 
 ---
 

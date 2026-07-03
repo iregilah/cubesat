@@ -22,6 +22,16 @@ extern "C" {
  */
 obc_err_t bsp_init(void);
 
+/**
+ * @brief Drive the ILI9341 interface-mode straps IM1/IM2 permanently HIGH.
+ *
+ * The DevKit exposes only one 3V3 pin, so instead of hard-wiring IM1/IM2 to a
+ * rail we hold two GPIOs high for the whole runtime. Called first inside
+ * bsp_init(), before the panel leaves reset, so the strap is already valid when
+ * the ILI9341 latches its interface mode. Exposed separately for clarity/tests.
+ */
+void bsp_display_straps_high(void);
+
 /** @return Number of times the firmware has booted (persisted in NVS). */
 uint32_t bsp_boot_count(void);
 
