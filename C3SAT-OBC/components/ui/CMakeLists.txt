@@ -7,7 +7,7 @@ idf_component_register(
     REQUIRES
         obc_common
         bsp
-        hal
+        obc_hal
         drivers
         services
         freertos

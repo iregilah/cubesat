@@ -11,7 +11,7 @@ idf_component_register(
     REQUIRES
         obc_common
         bsp
-        hal
+        obc_hal
         driver
         esp_driver_spi
         esp_driver_gpio
