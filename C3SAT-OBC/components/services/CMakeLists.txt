@@ -18,5 +18,5 @@ idf_component_register(
         esp_driver_uart
         driver
         spiffs
-        esp_task_wdt
+        esp_system
 )
