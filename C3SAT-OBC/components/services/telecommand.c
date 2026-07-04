@@ -151,12 +151,21 @@ obc_err_t telecommand_start(void)
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT,
+        /* Use XTAL, not the PLL-derived default. With power management / light
+         * sleep enabled (see the "sleep: ..." lines at boot) the PLL_F80M that
+         * UART_SCLK_DEFAULT selects can be gated by DFS. uart_hal_init() then
+         * spins forever in uart_ll_update() (a reg_update sync that waits on
+         * the UART core clock) inside a critical section -> interrupt watchdog
+         * timeout -> boot loop. It was non-deterministic: the same image booted
+         * only when the PLL happened to be running. The 40 MHz crystal is
+         * always on regardless of DFS/light sleep, so the sync always completes
+         * (and 40 MHz is plenty for 115200 baud). */
+        .source_clk = UART_SCLK_XTAL,
     };
-    ESP_ERROR_CHECK(uart_driver_install(BSP_UART_LINK_PORT, 512, 512, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(BSP_UART_LINK_PORT, &cfg));
     ESP_ERROR_CHECK(uart_set_pin(BSP_UART_LINK_PORT, BSP_PIN_UART_TX, BSP_PIN_UART_RX,
                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    ESP_ERROR_CHECK(uart_driver_install(BSP_UART_LINK_PORT, 512, 512, 0, NULL, 0));
     reset_parser();
     if (xTaskCreate(uart_link_task, "uart_link", STACK_UART_LINK, NULL,
                     PRIO_UART_LINK, NULL) != pdPASS) {
